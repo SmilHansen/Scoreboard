@@ -1,4 +1,4 @@
-"# Scoreboard" 
+##### Scoreboard ##### 
 
 Indeholder kode til hhv. Master og Slave.
 
