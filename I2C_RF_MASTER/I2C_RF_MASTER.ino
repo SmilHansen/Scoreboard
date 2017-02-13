@@ -1,35 +1,26 @@
 /* MASTER || RF || COM 10 */
-
 #define BOARD_INTERRUPT_PIN 3
 #define RF_MODULE_PIN 4
-#define BAUD_RATE 9600
+#define BAUD_RATE 9600 // bruges til debugging, kommunikationshastighed over USB, skal fjernes i endelige udgave ! <------------------------------------------------------------###
 #define SLAVE_ADR 10 // Dette er adressen SLAVE [skal være ens i begge kode-stykker]
 
 #include <Wire.h>
 
 //** Variables, global **//
 
+// opretter et struct
 struct buttonStruct
 {
   byte one;
   byte two;
   byte three;
 };
-
+// laver en datatype af structet
 typedef struct buttonStruct button_t;
 
-byte bitVal = 0; //bitvalue på pin BOARD_INTERRUPT_PIN
-int printCount = 8;
-int pos;
-byte readByte;
-byte incomingByte;
-int byteCounter = 21;
-byte incData[255];
-byte dataLocation;
-boolean interrupted = false;
-int loopCounter = 0;
 button_t buttons[11]; // 11, så er 0 ubrugelig og [1] er lig knap 1.
 
+// denne skal fjernes i den endelige udgave, når tastetryk har fået en statisk værdi (evt. en macro '#define key1 00101011010 eller lignende) <---------------------------------###
 boolean setup_mode = true;
 
 byte processedData[4];
@@ -53,49 +44,43 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
   // Connect the Arduino to the USB
-  Serial.begin(BAUD_RATE);
+  Serial.begin(BAUD_RATE); // Skal fjernes i den endelige udgave! <-------------------------------------------------------------------------------------------------------------###
   digitalWrite(LED_BUILTIN, HIGH);
 
-  // Attach interrupt (giver nemmere opfattelse af hvor sendt data starter, men kan laves uden)
+  // Attach interrupt (giver nemmere en opfattelse af hvor sendt data starter, men kan laves uden)
+  // -- NB det er interrupts der skal bruges hvis man vil have det hele til at køre på én arduino!
   // attachInterrupt(digitalPinToInterrupt(BOARD_INTERRUPT_PIN), signalIncomming, RISING);
   // possible intterupt RISING, CHANGE
 
-  Wire.begin(); 
+  Wire.begin();
 }
 
 void signalIncomming() {
   //Read and store the signal into the storedData array
   for (int i = 0; i < dataSize; i = i + 2)
   {
-    //Identify the  length of the HIGH signal---------------HIGH
+    //Identificer længden af signal der modtages    ---------------HIGH
     dataCounter = 0; //reset the counter
     while (digitalRead(RF_MODULE_PIN) && dataCounter < maxSignalLength) {
       dataCounter++;
     }
-    storedData[i] = dataCounter;  //Store the length of the HIGH signal
+    storedData[i] = dataCounter;  //Gem længden af HIGH-signal (talt i clock-cycles)
 
-    //Identify the length of the LOW signal---------------LOW
+    //Identificer længden af signal der modtages    ---------------LOW
     dataCounter = 0; //reset the counter
     while (!digitalRead(RF_MODULE_PIN) && dataCounter < maxSignalLength) {
       dataCounter++;
     }
-    storedData[i + 1] = dataCounter; //Store the length of the LOW signal
+    storedData[i + 1] = dataCounter; //Gem længden af LOW-signal (talt i clock-cycles)
     if (dataCounter >= maxSignalLength) {
       break;
     }
   }
+  // NB. Der bør indføres noget der kan identificere det modtagne signal, der er aboslut ingen støjfiltrering pt.
+  storedData[0]++;  //Tilføj første signal (der igangsatte loopet), da digitalRead>threshold = blev tabt mens der lyttedes efter signal
 
-  storedData[0]++;  //Account for the first digitalRead>threshold = lost while listening for signal
-  /*
-    for (int i = 0; i < dataSize && storedData[i]; i++)
-    {
-    Serial.print(" ");
-    Serial.print(storedData[i]);
-    Serial.print("(");
-    Serial.print(i);
-    Serial.print(")");
-    }
-    Serial.print("\n"); */
+  // NB. Bliver arrayet nogensinde 'renset'?
+
   sequenceCleaner();
 }
 
@@ -109,17 +94,18 @@ void sequenceCleaner() {
   {
     if (storedData[i] < maxSignalLength)
     {
-      value = ((!(i % 2)) ? 1 : 0);
+      //value = ((!(i % 2)) ? 1 : 0); //er 'i' lige --> value=1; er 'i' ulige --> value=0
       for (j = 0; j < 8; j++)
       {
+        // Med given læsehastighed, læses der ca. 75 gange i sekundet, så en bit er ca. 75,
+        // derfor skelner vi ved 75/2 =~ 37 og 75+(75/2) =~ 112 osv., om det er en ny bit
         if ( ((37 + (j * 75)) < storedData[i] ) && ((112 + (j * 75)) > storedData[i]) )
         {
-          //Serial.print(value);
           resultData[byteCounter] = (resultData[byteCounter] << 1) | HIGH;
-          break;
+          break; // hopper ud af for-loop, da vi har fundet en bit
         } else {
-          //Serial.print(value);
           resultData[byteCounter] <<= 1;
+          break; // hopper ud af for-loop, da vi har fundet en bit [NB. dette er en ændring af originalen] <--------------------------------------------------------------------###
         }
       }
       bitCounter = (bitCounter + 1) % 8;
@@ -127,31 +113,26 @@ void sequenceCleaner() {
       {
         byteCounter++;
       }
-      //Serial.print(":");
     }
-  } /*
-  for (i = 0; i < byteCounter ; i++)
-  {
-    Serial.print(" ");
-    Serial.print(resultData[i], DEC);
-  } */
+  }
 
   processedData[1] = resultData[1];
   processedData[2] = resultData[2];
   processedData[3] = resultData[3];
-
-  /* Serial.print("\n"); */
+  // kan udvides til at returnere en pointer til et array eller struct-datatype... men globale variabler er så nemme!
 }
 
 void loop() {
-  
+  // Dette skal ændres så der i stedet er inkodet faktiske knappetryk fra fjernbetjeningen <------------------------------------------------------------------------------------###
   if (setup_mode) {
     for (int k = 1; k < 11; k++) {
       Serial.print("Tryk knap ");
       Serial.print(k, DEC);
       Serial.print(" ned: ");
       while (!digitalRead(RF_MODULE_PIN))
-      { } // looking for data
+      {
+        delay(1);  // looking for data
+      }
       signalIncomming();
 
       buttons[k].one = processedData[1];
@@ -178,13 +159,13 @@ void loop() {
     { } // looking for data
     signalIncomming();
 
-    for (int l = 1; l < 11; l++) {
-      if ( (processedData[1] == buttons[l].one) && (processedData[2] == buttons[l].two) && (processedData[3] == buttons[l].three) )
+    for (int p = 1; p < 11; p++) {
+      if ( (processedData[1] == buttons[p].one) && (processedData[2] == buttons[p].two) && (processedData[3] == buttons[p].three) )
       {
         Serial.print("\nDu trykkede ");
-        Serial.print(l, DEC);
+        Serial.print(p, DEC);
 
-        sendI2C(l);
+        sendI2C(p); // sender info om hvilken knap der er blevet trykket på, til den anden arduino!
       }
     }
 
@@ -192,15 +173,7 @@ void loop() {
 }
 
 void sendI2C(int dataToSend) {
-  Wire.beginTransmission(SLAVE_ADR);
-  Wire.write(dataToSend);             // sends the keypress to <LED CTRL> (the other arduino)
-  Wire.endTransmission();             // stop transmitting
+  Wire.beginTransmission(SLAVE_ADR);  // Sætter modtager (NB. modtageradressen defineres i SLAVE-koden, disse skal stemme overens)
+  Wire.write(dataToSend);             // Sender knappetrykket til <LED CTRL> (den anden arduino, vha. I2C)
+  Wire.endTransmission();             // Afslutter kommunikationen
 }
-
-
-
-
-
-
-
-
