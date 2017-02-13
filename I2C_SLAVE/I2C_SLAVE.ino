@@ -1,4 +1,4 @@
-/* SLAVECODE - LED CTRL || COM 4 */
+// SLAVECODE - LED CTRL || COM 4
 
 #define SLAVE_ADR 10 // Adressen der bliver sat på dette modul - denne skal være ens i begge kode-stykker
 #define RCLK_LATCH_PIN 4
@@ -8,13 +8,13 @@
 #define SER_1_DATA_PIN 8
 #define SER_2_DATA_PIN 9
 #define SER_3_DATA_PIN 10
-#define TIME_DELAY 499
+#define TIME_DELAY 499 // hvorfor 499? Det tager lidt tid at lave udregningerne, så et delay på ½ sekund (500 ms) er for meget!
 #define LEFTMOST true
 #define RIGHTMOST false
+#define COLON_BIT B10000000 // Den bit der repræsenterer kolon på tids-modulet
 
-#include <Wire.h>
+#include <Wire.h> // til I2C protokollen
 
-int LEDPIN = 13;
 int dataBuff[2];
 boolean freshData = false;
 unsigned long my_time, my_time_diff;
@@ -22,7 +22,8 @@ boolean toggel = false;
 
 int ude_point = 0;
 int hjemme_point = 0;
-int display_time[2] = {0, 0};
+// display_time :: [0] er venstre ciffer, altså tierne. [1] er højre ciffer, altså enerne.
+int display_time[2] = {0, 0}; 
 boolean time_running = false;
 
 static unsigned long lWaitMillis;
@@ -56,33 +57,34 @@ byte tal[11] = {  B01111011, // 0
 
 unsigned int d1, d2;
 
-const int clockPin = 4;   //SRCLK / SH_CP
-const int latchPin = 5;   //RCLK  / ST_CP
-const int dataPin = 6;    //SER   / DS
-
 void setup() {
+  //Definér pins til output
   pinMode(RCLK_LATCH_PIN, OUTPUT);
+
   pinMode(SER_1_DATA_PIN, OUTPUT);
   pinMode(SER_2_DATA_PIN, OUTPUT);
   pinMode(SER_3_DATA_PIN, OUTPUT);
+
   pinMode(SRCLK_1_PIN, OUTPUT);
   pinMode(SRCLK_2_PIN, OUTPUT);
   pinMode(SRCLK_3_PIN, OUTPUT);
+
   Serial.begin(9600);
   Serial.println("Begyndt:\n");
-  pinMode (LEDPIN, OUTPUT);
-  // Start the I2C Bus as Slave with adress SLAVE_ADR
+  pinMode (LED_BUILTIN, OUTPUT); //LED_BUILTIN == 13
+
+  // Start I2C Bussen som Slave med adressen angivet SLAVE_ADR
   Wire.begin(SLAVE_ADR);
 
   lWaitMillis = millis() + TIME_DELAY;  // initial setup
 
-  // Attach a function to trigger when something is received. (has to be last thing, as it can interupt)
+  // Forbind et funktionskald til data-input. -- Denne linje skal være sidste, da den kan interrupte (er en slags ISR [Interrupt Service Routine])
   Wire.onReceive(receiveEvent);
 }
 
 void loop() {
   if (freshData) {
-    registerWrite(dataBuff[0], dataBuff[1], toggel);
+    timeOutputToBoard(dataBuff[0], dataBuff[1], toggel);
     freshData = false;
     toggel = false;
   }
@@ -94,7 +96,8 @@ void loop() {
 
     toggel = !toggel;
 
-    // kinda nested for-loop, inner part w d2, outer w d1!
+    // Er en special-udgave af nested for-loop, indre del med d2, ydre med d1! - selve løkken indeholder reelt hele "loop"-funktionen
+    // NB. der er ingen fordel ved at forsøge at pakke det ind i en forløkke, da for-løkken ville producere SAMME ASM-kode!
     if (toggel) {
       d2++;
       if (d2 >= 10) {
@@ -105,48 +108,26 @@ void loop() {
         d1 = 0;
       }
     }
-    registerWrite(d2, d1, toggel);
+    timeOutputToBoard(d2, d1, toggel);
   }
   else
   {
-    // this is the part before the timer-loop is done (!)
-  }
-  /* COUNT-UP/DOWN TEST
-  for (int i = 0; i < 105; i++) {
-    Serial.print(10 * display_time[0] + display_time[1]++, DEC);
-    ctrl_time_overflow();
-    Serial.print(" ");
-    delay(10);
-  }
-  Serial.print("\n\n");
-  display_time[0] = 9; display_time[1] = 9;
-  for (int i = 99; i > -3; i--) {
-    Serial.print(10 * display_time[0] + display_time[1]--, DEC);
-    ctrl_time_overflow();
-    Serial.print(" ");
-    delay(10);
-  }
-  delay(100000); */
-
-  for (int i = 0; i < 99; i++) {
-    hjemmePointToBoard();
-    udePointToBoard();
-    delay(1000);
-    hjemme_point++;
-    ude_point++;
+    // Dette er stykket inden indre loop er færdig (!) - hvis det skal bruges til noget
   }
 }
 
 // This method sends bits to the shift register
-void registerWrite(int showNumber1, int showNumber2, boolean toggelBlinker) {
-  // turn off the output so the pins don't light up
-  // while you're shifting bits:
+void timeOutputToBoard(int showNumber1, int showNumber2, boolean toggelBlinker) { 
+  // Sluk for output mens der 'shiftes', så LED'erne ikke blinker
   digitalWrite(RCLK_LATCH_PIN, LOW);
 
-  // shift the bits out:
-  if (toggel) {
-    shiftOut(SER_1_DATA_PIN, SRCLK_1_PIN, MSBFIRST, tal[showNumber2] | B10000000 ); // forreste ciffer først
-    shiftOut(SER_1_DATA_PIN, SRCLK_1_PIN, MSBFIRST, tal[showNumber1] | B10000000 );
+  // 'shift' bitsne ud
+  if (toggelBlinker) {
+    // forreste ciffer først (venstre)
+    // reelt er det kun det ene modul der har kolon, men da det andet modul ikke har noget på den pin
+    // kan de to moduler uhindret byttes om, hvis COLOR_BIT shiftes ud på begge moduler!
+    shiftOut(SER_1_DATA_PIN, SRCLK_1_PIN, MSBFIRST, tal[showNumber2] | COLON_BIT ); 
+    shiftOut(SER_1_DATA_PIN, SRCLK_1_PIN, MSBFIRST, tal[showNumber1] | COLON_BIT ); 
   } else {
     shiftOut(SER_1_DATA_PIN, SRCLK_1_PIN, MSBFIRST, tal[showNumber2] );
     shiftOut(SER_1_DATA_PIN, SRCLK_1_PIN, MSBFIRST, tal[showNumber1] );
@@ -155,48 +136,54 @@ void registerWrite(int showNumber1, int showNumber2, boolean toggelBlinker) {
 }
 
 void hjemmePointToBoard() {
-  // turn off the output so the pins don't light up
-  // while you're shifting bits:
+  // Sluk for output mens der 'shiftes', så LED'erne ikke blinker
   digitalWrite(RCLK_LATCH_PIN, LOW);
+  // forreste ciffer først (venstre)
   shiftOut(SER_2_DATA_PIN, SRCLK_2_PIN, MSBFIRST, tal[digit_get(hjemme_point, LEFTMOST)]);
   shiftOut(SER_2_DATA_PIN, SRCLK_2_PIN, MSBFIRST, tal[digit_get(hjemme_point, RIGHTMOST)]);
   digitalWrite(RCLK_LATCH_PIN, HIGH);
 }
 
-void udePointToBoard() {
-  // turn off the output so the pins don't light up
-  // while you're shifting bits:
+void udePointToBoard() {  
+  // Sluk for output mens der 'shiftes', så LED'erne ikke blinker
   digitalWrite(RCLK_LATCH_PIN, LOW);
+  // forreste ciffer først (venstre)
   shiftOut(SER_3_DATA_PIN, SRCLK_3_PIN, MSBFIRST, tal[digit_get(ude_point, LEFTMOST)]);
   shiftOut(SER_3_DATA_PIN, SRCLK_3_PIN, MSBFIRST, tal[digit_get(ude_point, RIGHTMOST)]);
   digitalWrite(RCLK_LATCH_PIN, HIGH);
 }
-int digit_get(int number, boolean leftmost) { 
+
+int digit_get(int number, boolean leftmost) {
   Serial.print("\nNumber: ");
   Serial.print(number, DEC);
   int ret_val = 0;
-  if (leftmost) {
-    for (ret_val = 0; number >= 10; number -= 10) 
-      {ret_val++;} // tæller antal dekrementeringer
-  } else {
-    while (number >= 10) 
-      {number -= 10;} // giver rest efter dekrementeringer
+  if (leftmost) { 
+    //Dette kunne gøres mere elegant med modulo-operator, men det er testet og virker!
+    //returnerer 0x, 1x, 2x ... 8x, 9x (altså 'tierne')
+    for (ret_val = 0; number >= 10; number -= 10)
+    {
+      ret_val++; // tæller antal dekrementeringer
+    }
+  } else { // Hvis ikke 'leftmost', så antages 'rightmost', f.eks. x0, x1, x2 ... x8, x9
+    while (number >= 10)
+    {
+      number -= 10; // giver rest efter dekrementeringer
+    }
     ret_val = number;
   }
-  Serial.print("\nret_val: ");
-  Serial.print(ret_val, DEC);  
+  
   if (ret_val < 10 && ret_val >= 0) {
-      return ret_val;  
-    } else {
-      return 10; // Error-code (shows E in display)
-    }
+    return ret_val;
+  } else {
+    return 10; // 10 giver error-code (Viser E for Error i 'display')
+  }
 }
 
 void receiveEvent(int bytes) {
   dataBuff[1] = dataBuff[0];
   dataBuff[0] = Wire.read();    // read one character from the I2C
   freshData = true;
-  
+
   switch (dataBuff[0]) {
     case 1  :
       Serial.print("PLUS POINT HJEMME - ");
@@ -241,7 +228,7 @@ void receiveEvent(int bytes) {
         Serial.print("TIDEN KOERER\n");
       } else {
         Serial.print("TIDEN KOERER IKKE\n");
-      }
+      } 
       break;
 
     case 6  : // START 45 MIN
@@ -255,7 +242,7 @@ void receiveEvent(int bytes) {
       Serial.print("TID PLUS - ");
       display_time[1]++;
       ctrl_time_overflow();
-      Serial.print(display_time[1] * 10 + display_time[1]);
+      Serial.print(display_time[0] * 10 + display_time[1]);
       Serial.print("\n");
       break;
 
@@ -263,38 +250,45 @@ void receiveEvent(int bytes) {
       Serial.print("TID MINUS - ");
       display_time[1]--;
       ctrl_time_overflow();
-      Serial.print(display_time[1] * 10 + display_time[1]);
+      Serial.print(display_time[0] * 10 + display_time[1]);
       Serial.print("\n");
       break;
 
-
     default :
       Serial.print("FORKERT TASTETRYK!\n");
+      break;
   }
 }
 
-void ctrl_time_overflow() { // korrigerer, når der lægges til og trækkes fra i tid, så overflow håndteres
+void ctrl_time_overflow() { 
+  // korrigerer, når der lægges til og trækkes fra i tid, så "overflow" håndteres
+  // således at flg. gælder:
+  // [0][0] - 1 giver 0
+  // [9][9] + 1 giver 0
+  // [x][9] + 1 giver [x+1][0]
+  // [x][0] - 1 giver [x-1][9]
+  // funktion er testet og giver ønskede resultater, begge veje!
   if (display_time[1] < 0) {
     if (display_time[0] == 0) {
       display_time[1] = 0;
     } else {
-      display_time[1] = 9; // roll-'over'
+      display_time[1] = 9; // roll-'over' ~ altså i negativ retning
       display_time[0]--;
-    } // decrement due to roll-'over'
+    } // dekrementér pga. roll-'over' ~ altså i negativ retning
   }
   if (display_time[1] > 9) {
-    display_time[1] = 0; // roll-over
-    display_time[0]++; // increment due to roll-over
+    display_time[1] = 0; // "roll-over"
+    display_time[0]++; // inkrementér pga. "roll-over"
   }
   if (display_time[0] < 0) {
     display_time[0] = 0;
   }
-  if (display_time[0] > 9) {
-    display_time[0] = 0;
+  if (display_time[0] > 9) { 
+    display_time[0] = 0; // "roll-over"
   }
 }
 
-void reset_board() {
+void reset_board() { // denne funktion nulstiller alle display-instillinger
   ude_point = 0;
   hjemme_point = 0;
   display_time[0] = 0;
