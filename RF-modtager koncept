@@ -1,0 +1,86 @@
+#define RF_PIN 4
+#define MAX_TILLADTE_GEMTE_BITS 192
+
+unsigned int middelvaerdiForBitLaengde = 105;
+unsigned int maksimaleTilladteAfvigelseForSignalLaengde = 30; // i begge retninger, dvs +/-.
+int gemteBitsLaengde[MAX_TILLADTE_GEMTE_BITS];
+int nuvaerendeSignalLaengde;
+unsigned int taerskelVaerdi = 50;
+unsigned int maxTilladteSignalLaengde = MAX_TILLADTE_GEMTE_BITS * middelvaerdiForBitLaengde;
+unsigned int antalGemteBits;
+byte endeligData[24];
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(RF_PIN, INPUT);
+}
+
+void loop() {
+  ventPaaSignal();
+  filtrerSignal();
+  
+}
+
+void ventPaaSignal() {
+  antalGemteBits = 0;
+  while (true) {
+    for (nuvaerendeSignalLaengde = 0; digitalRead(RF_PIN); nuvaerendeSignalLaengde++) { // Leverer en HIGH-bit
+      // kører så længe RF-modulet modtager signal (første HIGH-bit)
+    }
+    if (nuvaerendeSignalLaengde >= taerskelVaerdi) {
+      break; // skipper ud af while-løkken
+    }
+  }
+
+  gemteBitsLaengde[antalGemteBits++] = nuvaerendeSignalLaengde;
+
+  // terskel nået, så det er sandsynligvis ikke støj - og dermed begynder vi at gemme signalet
+  while (antalGemteBits < MAX_TILLADTE_GEMTE_BITS)
+  {
+    for (nuvaerendeSignalLaengde = 0; nuvaerendeSignalLaengde < maxTilladteSignalLaengde && !digitalRead(RF_PIN); nuvaerendeSignalLaengde++) {} // leverer en LOW-bit
+
+    if (nuvaerendeSignalLaengde < maxTilladteSignalLaengde) {
+      gemteBitsLaengde[antalGemteBits++] = nuvaerendeSignalLaengde;
+    } else {
+      gemteBitsLaengde[antalGemteBits++] = -1;
+      break;
+    }
+
+    for (nuvaerendeSignalLaengde = 0; nuvaerendeSignalLaengde < maxTilladteSignalLaengde && digitalRead(RF_PIN); nuvaerendeSignalLaengde++) {} // leverer en HIGH-bit
+
+    if (nuvaerendeSignalLaengde < maxTilladteSignalLaengde) {
+      gemteBitsLaengde[antalGemteBits++] = nuvaerendeSignalLaengde;
+    } else {
+      gemteBitsLaengde[antalGemteBits++] = -1; // giver ikke så meget mening at der kommer for meget data på HIGH- men man ved aldrig (!)
+      break;
+    }
+  }
+}
+
+void filtrerSignal() {
+  boolean nuvaerendeBits = HIGH;
+  int bitTaeller = 0;
+  int byteTaeller = 0;
+  for (int i = 0; ((i < MAX_TILLADTE_GEMTE_BITS) && (gemteBitsLaengde[i] != -1)); i++) {
+    Serial.print(gemteBitsLaengde[i]);
+    Serial.print(";");
+    //Serial.print(udregnAntalBits(gemteBitsLaengde[i]));
+    //Serial.print(") ");
+    
+    for (int j = udregnAntalBits(gemteBitsLaengde[i]); j > 0; j--) {
+      endeligData[byteTaeller] = (endeligData[byteTaeller] << 1 ) | nuvaerendeBits;
+      // Serial.print(nuvaerendeBits, BIN);
+      ++bitTaeller %= 8;
+      if (!bitTaeller) {
+        byteTaeller++;
+      }
+    } // chopper ikke som den skal, hvis den f.eks. på 7'ende bit modtager 5 bits [tilføj tæller]
+    nuvaerendeBits = nuvaerendeBits ? LOW : HIGH;
+        // Serial.print("\n");
+  }
+      Serial.print("\n");
+}
+
+int udregnAntalBits(int signallaengdeDerSkalOmregnes) { // denne funktion kan rafineres
+  return round(signallaengdeDerSkalOmregnes / middelvaerdiForBitLaengde);
+}
